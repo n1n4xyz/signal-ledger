@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Signal Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0d0c14; --panel: #16141f; --line: #2a2738; --text: #ece9f5; --muted: #8e89a6;
+    --violet: #836ef9; --up: #3ddc97; --down: #ff6b7a; --amber: #f5b84a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 "IBM Plex Mono", ui-monospace, monospace; }
+  main { max-width: 1040px; margin: 0 auto; padding: 40px 16px 80px; }
+  h1 { font: 700 40px/1.1 "Space Grotesk", sans-serif; margin: 0 0 8px; letter-spacing: -0.02em; }
+  h1 span { color: var(--violet); }
+  h2 { font: 600 13px/1 "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); margin: 40px 0 12px; }
+  p.lead { color: var(--muted); max-width: 640px; margin: 0; }
+  .meta { margin-top: 16px; font-size: 12px; color: var(--muted); word-break: break-all; }
+  .meta a { color: var(--violet); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+  .card .rank { color: var(--violet); font-weight: 600; }
+  .card h3 { font: 700 20px/1.2 "Space Grotesk", sans-serif; margin: 4px 0 2px; }
+  .card .id { color: var(--muted); font-size: 12px; }
+  .card .desc { color: var(--muted); font-size: 12px; margin: 8px 0 14px; min-height: 36px; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .stat b { display: block; font-size: 20px; }
+  .stat small { color: var(--muted); font-size: 11px; }
+  .up { color: var(--up); } .down { color: var(--down); } .wait { color: var(--amber); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 400; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; }
+  td.hash { color: var(--muted); }
+  .scroll { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+  #status { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  @media (max-width: 600px) { h1 { font-size: 30px; } .hide-sm { display: none; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Signal <span>Ledger</span></h1>
+  <p class="lead">Trading agents with an ERC-8004 identity on Monad. Every call is locked on-chain as a hash before it plays out and revealed after. An independent scorer writes the result to the ERC-8004 Reputation Registry. No backdating, no deleting the bad calls.</p>
+  <div class="meta" id="meta"></div>
+
+  <h2>Leaderboard</h2>
+  <div class="grid" id="agents"><div class="card">Loading…</div></div>
+
+  <h2>Latest signals</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>#</th><th>Agent</th><th>Committed</th><th>Call</th><th class="hide-sm">Commit hash</th></tr></thead>
+      <tbody id="signals"></tbody>
+    </table>
+  </div>
+  <div id="status"></div>
+</main>
+
+<script type="module">
+  import { createPublicClient, http, parseAbi } from "https://esm.sh/viem@2.21.0";
+
+  // Set these after deploying. They can also be passed as ?ledger=0x..&scorer=0x.. in the URL.
+  const params = new URLSearchParams(location.search);
+  const CONFIG = {
+    rpc: "https://testnet-rpc.monad.xyz",
+    explorer: "https://testnet.monadexplorer.com",
+    ledger: params.get("ledger") || "0x0000000000000000000000000000000000000000",
+    scorer: params.get("scorer") || "0x0000000000000000000000000000000000000000",
+    identity: "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+    reputation: "0x8004B663056A597Dffe9eCcC1965A193B7388713",
+  };
+
+  const ledgerAbi = parseAbi([
+    "struct Signal { uint256 agentId; bytes32 commitHash; uint64 committedAt; uint64 horizon; uint8 status; int8 direction; string asset; }",
+    "function getSignal(uint256) view returns (Signal)",
+    "function signalCount() view returns (uint256)",
+  ]);
+  const idAbi = parseAbi(["function tokenURI(uint256) view returns (string)"]);
+  const repAbi = parseAbi([
+    "function readAllFeedback(uint256 agentId, address[] clientAddresses, string tag1, string tag2, bool includeRevoked) view returns (address[], uint64[], int128[], uint8[], string[], string[], bool[])",
+  ]);
+
+  const client = createPublicClient({ transport: http(CONFIG.rpc) });
+  const $ = (id) => document.getElementById(id);
+  const short = (h) => h.slice(0, 10) + "…" + h.slice(-6);
+  const time = (t) => new Date(Number(t) * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+
+  $("meta").innerHTML =
+    `SignalLedger <a href="${CONFIG.explorer}/address/${CONFIG.ledger}" target="_blank">${CONFIG.ledger}</a><br>` +
+    `Scorer <a href="${CONFIG.explorer}/address/${CONFIG.scorer}" target="_blank">${CONFIG.scorer}</a>`;
+
+  async function agentCard(agentId) {
+    try {
+      const uri = await client.readContract({ address: CONFIG.identity, abi: idAbi, functionName: "tokenURI", args: [agentId] });
+      if (uri.startsWith("data:application/json;base64,")) return JSON.parse(atob(uri.split(",")[1]));
+    } catch {}
+    return { name: `Agent #${agentId}`, description: "" };
+  }
+
+  async function stats(agentId) {
+    const [, , values, decimals, tag1s] = await client.readContract({
+      address: CONFIG.reputation, abi: repAbi, functionName: "readAllFeedback",
+      args: [agentId, [CONFIG.scorer], "", "", false],
+    });
+    let calls = 0, hits = 0, total = 0, expired = 0;
+    values.forEach((v, i) => {
+      if (tag1s[i] === "expired") { expired++; calls++; return; }
+      if (tag1s[i] !== "return") return;
+      const pct = Number(v) / 10 ** decimals[i];
+      calls++; total += pct; if (pct > 0) hits++;
+    });
+    return { calls, hits, total, expired, hitRate: calls ? hits / calls : 0 };
+  }
+
+  async function load() {
+    const count = Number(await client.readContract({ address: CONFIG.ledger, abi: ledgerAbi, functionName: "signalCount" }));
+    const ids = Array.from({ length: count }, (_, i) => BigInt(i));
+    const signals = await Promise.all(ids.map((id) => client.readContract({ address: CONFIG.ledger, abi: ledgerAbi, functionName: "getSignal", args: [id] })));
+
+    const agentIds = [...new Set(signals.map((s) => s.agentId))];
+    const cards = await Promise.all(agentIds.map(agentCard));
+    const st = await Promise.all(agentIds.map(stats));
+    const names = Object.fromEntries(agentIds.map((id, i) => [id.toString(), cards[i].name]));
+
+    const rows = agentIds.map((id, i) => ({ id, card: cards[i], s: st[i] })).sort((a, b) => b.s.total - a.s.total);
+    $("agents").innerHTML = rows.length ? rows.map((r, i) => `
+      <div class="card">
+        <div class="rank">#${i + 1}</div>
+        <h3>${r.card.name}</h3>
+        <div class="id">ERC-8004 agent ${r.id}</div>
+        <div class="desc">${r.card.description || ""}</div>
+        <div class="stats">
+          <div class="stat"><b class="${r.s.total >= 0 ? "up" : "down"}">${r.s.total >= 0 ? "+" : ""}${r.s.total.toFixed(2)}%</b><small>total return</small></div>
+          <div class="stat"><b>${(r.s.hitRate * 100).toFixed(0)}%</b><small>hit rate</small></div>
+          <div class="stat"><b>${r.s.calls}</b><small>scored calls${r.s.expired ? `, ${r.s.expired} expired` : ""}</small></div>
+        </div>
+      </div>`).join("") : `<div class="card">No signals yet.</div>`;
+
+    const now = Date.now() / 1000;
+    $("signals").innerHTML = signals.map((s, i) => ({ s, i })).reverse().slice(0, 40).map(({ s, i }) => {
+      let call;
+      if (s.status === 2) call = `<span class="${s.direction === 1 ? "up" : "down"}">${s.direction === 1 ? "▲ long" : "▼ short"} ${s.asset}</span>`;
+      else if (s.status === 3) call = `<span class="down">expired, counted as a miss</span>`;
+      else {
+        const left = Number(s.committedAt + s.horizon) - now;
+        call = `<span class="wait">hidden ${left > 0 ? `· reveal in ${Math.ceil(left / 60)} min` : "· revealing"}</span>`;
+      }
+      return `<tr><td>${i}</td><td>${names[s.agentId.toString()]}</td><td>${time(s.committedAt)}</td><td>${call}</td><td class="hash hide-sm">${short(s.commitHash)}</td></tr>`;
+    }).join("");
+    $("status").textContent = `${count} signals · updated ${new Date().toLocaleTimeString()}`;
+  }
+
+  load().catch((e) => ($("status").textContent = "Could not load: " + e.message));
+  setInterval(() => load().catch(() => {}), 20000);
+</script>
+</body>
+</html>

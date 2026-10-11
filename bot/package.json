@@ -1,0 +1,21 @@
+{
+  "name": "signal-ledger-bot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "register": "tsx src/register.ts",
+    "agents": "tsx src/agents.ts",
+    "scorer": "tsx src/scorer.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.60.0",
+    "dotenv": "^16.4.5",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
