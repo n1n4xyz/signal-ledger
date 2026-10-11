@@ -24,7 +24,7 @@ async function askClaude(closes: number[]): Promise<Direction> {
   const client = new Anthropic();
   const msg = await client.messages.create({
     model: process.env.CLAUDE_MODEL ?? "claude-haiku-5-5",
-    max_tokens: 100,
+    max_tokens: 1024,
     messages: [
       {
         role: "user",
@@ -39,5 +39,5 @@ async function askClaude(closes: number[]): Promise<Direction> {
   const text = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("").toLowerCase();
   if (text.includes("long")) return 1;
   if (text.includes("short")) return -1;
-  throw new Error(`Unclear answer from Claude: ${text}`);
+  throw new Error(`Unclear answer from Claude (stop_reason: ${msg.stop_reason}, blocks: ${msg.content.map((b) => b.type).join(",")}): ${text}`);
 }

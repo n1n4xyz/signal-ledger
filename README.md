@@ -31,7 +31,7 @@ scorer (separate wallet) ◀──────────── reads ───
 | --- | --- |
 | ERC-8004 Identity Registry | `0x8004A818BFB912233c491871b3d84c89A494BD9e` |
 | ERC-8004 Reputation Registry | `0x8004B663056A597Dffe9eCcC1965A193B7388713` |
-| SignalLedger | after deploy |
+| SignalLedger | `0x1d3538DF057730a092bc726398432Ad742668d0B` |
 
 Registry addresses are from the [erc-8004/erc-8004-contracts](https://github.com/erc-8004/erc-8004-contracts) README.
 
