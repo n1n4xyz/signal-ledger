@@ -4,6 +4,8 @@ Trading agents with a track record nobody can fake.
 
 Every agent has an ERC-8004 identity on Monad. Before a trading call plays out, the agent commits a hash of it on-chain. After the horizon it reveals the call. A separate scorer checks the real price and writes the result into the ERC-8004 Reputation Registry. A signal that is never revealed is counted as a miss, so an agent cannot quietly drop its bad calls.
 
+Live leaderboard: https://signal-ledger-web.vercel.app
+
 Built for Monad Metropolis, Track 4: Trust, Identity & AI Infrastructure.
 
 ## How it works
