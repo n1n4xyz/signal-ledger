@@ -77,21 +77,26 @@ async function scoreOne(id: bigint, now: number): Promise<boolean> {
 async function main() {
   log(`Scorer ${wallet.account.address} watching ${ledger}`);
   for (;;) {
-    const state = loadState<ScorerState>("scorer.json", { done: [] });
-    const done = new Set(state.done);
-    const count = await publicClient.readContract({ address: ledger, abi: signalLedgerAbi, functionName: "signalCount" });
-    const now = Number((await publicClient.getBlock()).timestamp);
+    try {
+      const state = loadState<ScorerState>("scorer.json", { done: [] });
+      const done = new Set(state.done);
+      const count = await publicClient.readContract({ address: ledger, abi: signalLedgerAbi, functionName: "signalCount" });
+      const now = Number((await publicClient.getBlock()).timestamp);
 
-    for (let i = 0n; i < count; i++) {
-      if (done.has(i.toString())) continue;
-      try {
-        if (await scoreOne(i, now)) {
-          done.add(i.toString());
-          saveState("scorer.json", { done: [...done] });
+      for (let i = 0n; i < count; i++) {
+        if (done.has(i.toString())) continue;
+        try {
+          if (await scoreOne(i, now)) {
+            done.add(i.toString());
+            saveState("scorer.json", { done: [...done] });
+          }
+        } catch (e) {
+          log(`#${i}: scoring failed, retrying later:`, (e as Error).message.split("\n")[0]);
         }
-      } catch (e) {
-        log(`#${i}: scoring failed, retrying later:`, (e as Error).message.split("\n")[0]);
+        await sleep(300); // stay well under the RPC rate limit
       }
+    } catch (e) {
+      log("Round failed, retrying in 30 s:", (e as Error).message.split("\n")[0]);
     }
     await sleep(30_000);
   }

@@ -82,7 +82,19 @@
     "function readAllFeedback(uint256 agentId, address[] clientAddresses, string tag1, string tag2, bool includeRevoked) view returns (address[], uint64[], int128[], uint8[], string[], string[], bool[])",
   ]);
 
-  const client = createPublicClient({ transport: http(CONFIG.rpc) });
+  const client = createPublicClient({ transport: http(CONFIG.rpc, { retryCount: 5, retryDelay: 1500 }) });
+
+  // The public RPC allows 15 requests per second per IP, shared with the agents and scorer.
+  // Run reads in small batches with a pause so the page never eats that budget.
+  async function throttled(tasks, size = 4, pauseMs = 600) {
+    const out = [];
+    for (let i = 0; i < tasks.length; i += size) {
+      out.push(...(await Promise.all(tasks.slice(i, i + size).map((f) => f()))));
+      if (i + size < tasks.length) await new Promise((r) => setTimeout(r, pauseMs));
+    }
+    return out;
+  }
+  const signalCache = new Map(); // finished signals never change, read them once
   const $ = (id) => document.getElementById(id);
   const short = (h) => h.slice(0, 10) + "…" + h.slice(-6);
   const time = (t) => new Date(Number(t) * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -117,11 +129,16 @@
   async function load() {
     const count = Number(await client.readContract({ address: CONFIG.ledger, abi: ledgerAbi, functionName: "signalCount" }));
     const ids = Array.from({ length: count }, (_, i) => BigInt(i));
-    const signals = await Promise.all(ids.map((id) => client.readContract({ address: CONFIG.ledger, abi: ledgerAbi, functionName: "getSignal", args: [id] })));
+    const signals = await throttled(ids.map((id) => async () => {
+      if (signalCache.has(id)) return signalCache.get(id);
+      const s = await client.readContract({ address: CONFIG.ledger, abi: ledgerAbi, functionName: "getSignal", args: [id] });
+      if (s.status === 2 || s.status === 3) signalCache.set(id, s);
+      return s;
+    }));
 
     const agentIds = [...new Set(signals.map((s) => s.agentId))];
-    const cards = await Promise.all(agentIds.map(agentCard));
-    const st = await Promise.all(agentIds.map(stats));
+    const cards = await throttled(agentIds.map((id) => () => agentCard(id)));
+    const st = await throttled(agentIds.map((id) => () => stats(id)));
     const names = Object.fromEntries(agentIds.map((id, i) => [id.toString(), cards[i].name]));
 
     const rows = agentIds.map((id, i) => ({ id, card: cards[i], s: st[i] })).sort((a, b) => b.s.total - a.s.total);
@@ -153,7 +170,7 @@
   }
 
   load().catch((e) => ($("status").textContent = "Could not load: " + e.message));
-  setInterval(() => load().catch(() => {}), 20000);
+  setInterval(() => load().catch(() => {}), 60000);
 </script>
 </body>
 </html>

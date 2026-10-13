@@ -28,11 +28,15 @@ export const HORIZON_SECONDS = Number(process.env.HORIZON_SECONDS ?? 900);
 export const COMMIT_EVERY_SECONDS = Number(process.env.COMMIT_EVERY_SECONDS ?? 900);
 export const REVEAL_WINDOW_SECONDS = 3600; // must match SignalLedger.REVEAL_WINDOW
 
-export const publicClient = createPublicClient({ chain: monadTestnet, transport: http(RPC_URL) });
+// The public Monad testnet RPC allows 15 requests per second per IP.
+// Agents, scorer and the leaderboard share that budget, so retry with backoff instead of crashing.
+const transport = () => http(RPC_URL, { retryCount: 6, retryDelay: 1500 });
+
+export const publicClient = createPublicClient({ chain: monadTestnet, transport: transport() });
 
 export function walletFor(keyEnv: "AGENT_OWNER_KEY" | "SCORER_KEY") {
   const account = privateKeyToAccount(need(keyEnv) as Hex);
-  return createWalletClient({ account, chain: monadTestnet, transport: http(RPC_URL) });
+  return createWalletClient({ account, chain: monadTestnet, transport: transport() });
 }
 
 // Small JSON state files so the agents and the scorer survive a restart.

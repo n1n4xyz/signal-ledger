@@ -71,9 +71,15 @@ async function revealDue() {
       await publicClient.waitForTransactionReceipt({ hash });
       log(`Revealed #${p.signalId}: ${p.direction === 1 ? "long" : "short"} ${p.asset}`);
     } catch (e) {
-      log(`Reveal #${p.signalId} failed, retrying next round:`, (e as Error).message.split("\n")[0]);
-      left.push(p);
+      const msg = (e as Error).message;
+      if (msg.includes("TooLate") || msg.includes("WrongStatus")) {
+        log(`#${p.signalId} can no longer be revealed, dropping it (the scorer counts it as a miss)`);
+      } else {
+        log(`Reveal #${p.signalId} failed, retrying next round:`, msg.split("\n")[0]);
+        left.push(p);
+      }
     }
+    await sleep(500);
   }
   saveState("pending.json", left);
 }
@@ -85,18 +91,23 @@ async function main() {
 
   let nextCommit = 0;
   for (;;) {
-    if (Date.now() >= nextCommit) {
-      nextCommit = Date.now() + COMMIT_EVERY_SECONDS * 1000;
-      const closes = await recentCloses(ASSET, 30);
-      for (const a of agents) {
-        try {
-          await commitFor(a, closes);
-        } catch (e) {
-          log(`${a.name}: commit failed:`, (e as Error).message.split("\n")[0]);
+    try {
+      if (Date.now() >= nextCommit) {
+        const closes = await recentCloses(ASSET, 30);
+        nextCommit = Date.now() + COMMIT_EVERY_SECONDS * 1000;
+        for (const a of agents) {
+          try {
+            await commitFor(a, closes);
+          } catch (e) {
+            log(`${a.name}: commit failed:`, (e as Error).message.split("\n")[0]);
+          }
+          await sleep(500);
         }
       }
+      await revealDue();
+    } catch (e) {
+      log("Round failed, retrying in 15 s:", (e as Error).message.split("\n")[0]);
     }
-    await revealDue();
     await sleep(15_000);
   }
 }
